@@ -7,8 +7,16 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
+using Hangfire;
 
 var builder = WebApplication.CreateBuilder(args);
+// Add Hangfire services
+builder.Services.AddHangfire(config =>
+{
+    config.UseSqlServerStorage(builder.Configuration.GetConnectionString("DefaultConnection"));
+});
+
+builder.Services.AddHangfireServer();
 
 // Add Controllers
 builder.Services.AddControllers();
@@ -43,6 +51,7 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 builder.Services.AddScoped<TokenService>();
+builder.Services.AddTransient<EmailService>();
 
 // Add DbContext
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -77,16 +86,6 @@ builder.Services.AddAuthentication(options =>
 });
 
 
-var roleManager = builder.Services.BuildServiceProvider().GetRequiredService<RoleManager<IdentityRole>>();
-
-if (!await roleManager.RoleExistsAsync("Admin"))
-{
-    await roleManager.CreateAsync(new IdentityRole("Admin"));
-}
-if (!await roleManager.RoleExistsAsync("User"))
-{
-    await roleManager.CreateAsync(new IdentityRole("User"));
-}
 
 
 builder.Services.AddAuthorization(options =>
@@ -97,6 +96,25 @@ builder.Services.AddAuthorization(options =>
 });;
 
 var app = builder.Build();
+
+// Apply migrations and initialize roles
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    dbContext.Database.Migrate(); // Apply pending migrations
+
+    // Initialize roles
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+    if (!await roleManager.RoleExistsAsync("Admin"))
+    {
+        await roleManager.CreateAsync(new IdentityRole("Admin"));
+    }
+    if (!await roleManager.RoleExistsAsync("User"))
+    {
+        await roleManager.CreateAsync(new IdentityRole("User"));
+    }
+}
+
 app.UseSwagger();
 app.UseSwaggerUI();
 
@@ -107,6 +125,11 @@ app.UseAuthorization();
 
 // Map Controllers
 app.MapControllers();
+
+// Configure Hangfire dashboard (optional)
+app.UseHangfireDashboard();
+// Schedule recurring jobs
+RecurringJob.AddOrUpdate<EmailService>("daily-report", x => x.SendDailyReport(), Cron.Daily);
 
 
 app.Run();

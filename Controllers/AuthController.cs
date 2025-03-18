@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Hangfire;
 using JwtAuthDemo.Models;
 using JwtAuthDemo.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -15,12 +16,16 @@ namespace JwtAuthDemo.Controllers
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly SignInManager<ApplicationUser> _signInManager;
         private readonly TokenService _tokenService;
+        private readonly EmailService _emailService;
 
-        public AuthController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, TokenService tokenService)
+        public AuthController(UserManager<ApplicationUser> userManager, 
+            SignInManager<ApplicationUser> signInManager, 
+            TokenService tokenService, EmailService emailService)
         {
             _userManager = userManager;
             _signInManager = signInManager;
             _tokenService = tokenService;
+            _emailService = emailService;
         }
 
         [HttpPost("register")]
@@ -37,6 +42,9 @@ namespace JwtAuthDemo.Controllers
 
             // Add the "Create" permission claim
             await _userManager.AddClaimAsync(user, new Claim("Permission", "Create"));
+            
+            // Enqueue email job
+            BackgroundJob.Enqueue(() => _emailService.SendEmail(model.Email, "Welcome to Our App", "Thank you for registering!"));
 
             return Ok(new { Message = "User registered successfully" });
         }
